@@ -1,0 +1,165 @@
+{
+  "base_url": {
+    "description": "sb6657 后端地址",
+    "type": "string",
+    "default": "https://hguofichp.cn:10086",
+    "hint": "默认使用 sb6657.cn 站点前端所调用的公开后端。仅当你自己有镜像/代理时才需要修改。"
+  },
+  "timeout": {
+    "description": "单次请求超时（秒）",
+    "type": "int",
+    "default": 10,
+    "hint": "网络较差时可以调大，建议 5 ~ 30。"
+  },
+  "default_count": {
+    "description": "默认返回条数",
+    "type": "int",
+    "default": 1,
+    "hint": "直接发送 /烂梗 时返回几条；搜索和标签随机也会参考这个值。"
+  },
+  "max_count": {
+    "description": "单次最多返回条数",
+    "type": "int",
+    "default": 10,
+    "hint": "防止有人刷 /烂梗 100 把机器人打死。"
+  },
+  "hot_count": {
+    "description": "热榜返回条数",
+    "type": "int",
+    "default": 5
+  },
+  "max_length": {
+    "description": "单条烂梗最大字符数",
+    "type": "int",
+    "default": 200,
+    "hint": "超出部分会被截断并加省略号。填 0 表示不限制。"
+  },
+  "show_title": {
+    "description": "显示标题行（🎲 6657 烂梗 #编号）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭，只发梗本身。"
+  },
+  "show_count_header": {
+    "description": "显示条数/榜单标题行",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后会在多条或热榜/搜索/标签结果前加一行标题。"
+  },
+  "show_tags": {
+    "description": "显示标签",
+    "type": "bool",
+    "default": false
+  },
+  "show_meta": {
+    "description": "显示热度与时间",
+    "type": "bool",
+    "default": false
+  },
+  "append_source": {
+    "description": "在结尾附带 sb6657.cn 链接",
+    "type": "bool",
+    "default": false
+  },
+  "dedupe_size": {
+    "description": "会话内去重记忆条数",
+    "type": "int",
+    "default": 30,
+    "hint": "记录每个会话最近发送过的烂梗，尽量不重复。填 0 关闭去重。"
+  },
+  "tag_cache_ttl": {
+    "description": "标签字典缓存时间（秒）",
+    "type": "int",
+    "default": 1800
+  },
+  "auto_trigger_enable": {
+    "description": "启用关键词自动触发",
+    "type": "bool",
+    "default": false,
+    "obvious_hint": true,
+    "hint": "开启后，群友说「来条烂梗」之类的话，机器人会自动回一条，无需输入指令。"
+  },
+  "auto_trigger_keywords": {
+    "description": "自动触发关键词",
+    "type": "list",
+    "default": ["来条烂梗", "来个烂梗", "随机烂梗", "6657烂梗", "整点烂梗"],
+    "hint": "消息中包含任一关键词即触发。"
+  },
+  "auto_trigger_cooldown": {
+    "description": "自动触发冷却（秒）",
+    "type": "int",
+    "default": 15,
+    "hint": "同一会话在冷却时间内只会触发一次。"
+  },
+  "auto_trigger_groups_only": {
+    "description": "仅群聊自动触发",
+    "type": "bool",
+    "default": false
+  },
+  "auto_trigger_stop_llm": {
+    "description": "自动触发后不再让 AI 回复",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后，AI 可能会在烂梗之后再接一句，容易显得重复。"
+  },
+  "nl_search_enable": {
+    "description": "自然语言检索（说「xxx 的烂梗」自动搜）",
+    "type": "bool",
+    "default": true,
+    "obvious_hint": true,
+    "hint": "开启后，群友说「niko 的烂梗」「来点詹姆斯的烂梗」会直接搜到对应的梗，不需要指令。"
+  },
+  "nl_search_cooldown": {
+    "description": "自然语言检索冷却（秒）",
+    "type": "int",
+    "default": 20,
+    "hint": "同一会话在冷却时间内只响应一次，避免几个人连着刷。"
+  },
+  "nl_search_groups_only": {
+    "description": "仅群聊响应自然语言检索",
+    "type": "bool",
+    "default": false
+  },
+  "nl_search_stop_llm": {
+    "description": "检索到烂梗后不再让 AI 接话",
+    "type": "bool",
+    "default": true,
+    "hint": "默认关闭 AI 续写，避免烂梗后面又跟一段解释。"
+  },
+  "nl_search_reply_when_empty": {
+    "description": "没搜到时的处理",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后没搜到会回一句「站里没翻到」，关闭则安静不吭声。"
+  },
+  "llm_search_enable": {
+    "description": "用 LLM 扩展检索词",
+    "type": "bool",
+    "default": true,
+    "hint": "直搜没结果时，让对话模型补全别名/外号（如「大表哥」→ device）再搜一次。需要先配好对话模型。"
+  },
+  "llm_search_max_terms": {
+    "description": "LLM 最多给出几个检索词",
+    "type": "int",
+    "default": 3,
+    "hint": "每个词都会触发一次站内搜索，建议 1 ~ 3。"
+  },
+  "llm_rerank": {
+    "description": "用 LLM 对候选做相关性重排",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后每次多消耗一次模型调用；命中率高时没必要开。"
+  },
+  "llm_tool_enable": {
+    "description": "允许 AI 主动调用烂梗检索工具",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后主对话模型可以在聊天里自己决定去查烂梗。"
+  },
+  "llm_timeout": {
+    "description": "LLM 调用超时（秒）",
+    "type": "int",
+    "default": 15,
+    "hint": "超时就退回纯站内搜索，不会卡住群聊。"
+  }
+}
