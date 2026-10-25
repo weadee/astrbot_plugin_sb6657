@@ -2,7 +2,7 @@ name: astrbot_plugin_sb6657
 display_name: 6657 玩机器烂梗
 short_desc: 一键把 sb6657.cn 的玩机器烂梗接进群聊
 desc: 从 sb6657.cn（玩机器烂梗收集）获取直播间烂梗，支持随机抽取、关键词搜索、24h/7天热榜和标签筛选；说「xxx 的烂梗」会自己检索，可在句子里指定要几条，搜不到时由 LLM 扩展别名再找。
-version: v1.2.0
+version: v1.2.1
 author: weedee
 repo: https://github.com/weadee/astrbot_plugin_sb6657
 astrbot_version: ">=4.0"

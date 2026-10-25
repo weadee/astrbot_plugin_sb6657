@@ -18,7 +18,8 @@
     LLM 搜索（v1.1）
         群里直接说「niko 的烂梗」「来点詹姆斯的烂梗」这类话，插件会自己
         抽出主题词去站内检索；规则抽不出 / 搜不到时，再让 LLM 扩同义词、
-        别名（例如 大表哥 → device），并可让 LLM 对候选做相关性重排。
+        别名（例如 大表哥 → karrigan，对照表可在配置里维护），并可让 LLM
+        对候选做相关性重排。
         同时注册了一个 LLM 工具 sb6657_meme，让主对话模型也能主动调用。
 
     数量（v1.2）
@@ -46,6 +47,9 @@ from astrbot.api.star import Context, Star
 
 DEFAULT_BASE_URL = "https://hguofichp.cn:10086"
 SITE_URL = "https://sb6657.cn"
+
+# 外号对照的默认值，可在插件配置 llm_alias_hints 里覆盖/追加，每行「外号=正式名」
+DEFAULT_ALIAS_HINTS = "大表哥=karrigan"
 
 # 指令名与别名。改动时请同步修改 _extract_args 与 _looks_like_command。
 COMMAND_NAMES = ("烂梗", "sb6657", "来条烂梗")
@@ -786,15 +790,26 @@ class Sb6657Plugin(Star):
             value = 3
         return max(1, min(value, 5))
 
+    def _alias_hints(self) -> str:
+        """外号对照表（来自配置），每行「外号=正式名」，也接受分号分隔。"""
+        raw = str(self._cfg("llm_alias_hints", DEFAULT_ALIAS_HINTS) or "").strip()
+        if not raw:
+            return ""
+        lines = [ln.strip() for ln in re.split(r"[\r\n;；]+", raw) if ln.strip()]
+        return "\n".join(lines[:30])
+
     async def llm_terms(self, raw_text: str, umo: str | None = None, limit: int | None = None) -> list[str]:
         """让 LLM 把一句话拆成若干个站内能命中的检索词（含别名/外号）。"""
         limit = limit or self._llm_term_limit()
+        hints = self._alias_hints()
         system_prompt = (
             "你在为「6657 玩机器烂梗库」抽取检索词。"
             "用户说了一句话，里面提到某个主播、选手、解说、事件或口头禅，"
             "你要给出能在这个站内搜到相关烂梗的关键词。"
             "优先用原词；再补同义外号、英文名、拼音、常见错写、可以拆开检索的片段。"
-            "不要给整句，不要解释，不要加标点。"
+            "外号必须是你能确定指同一个人的，拿不准就只给原词，不要硬凑。"
+            + (f"\n已知别名对照（以此为准，不要改判给其他人）：\n{hints}\n" if hints else "")
+            + "不要给整句，不要解释，不要加标点。"
             f'只输出 JSON：{{"terms": ["词1", "词2"]}}，最多 {limit} 个。'
         )
         prompt = f"用户原话：{raw_text}\n请给出检索词。"

@@ -176,7 +176,7 @@ class FakePlugin(mod.Sb6657Plugin):
             if FAIL_SEARCH[0]:
                 return BOOM
             keyword = str((json_body or {}).get("barrage") or "")
-            if "niko" in keyword.lower() or keyword in ("device", "s1mple"):
+            if "niko" in keyword.lower() or keyword in ("device", "s1mple", "karrigan"):
                 return SEARCH["data"]
             return {"total": 0, "list": [], "isLastPage": True}
         if path in ("/machine/hotBarrageOf24H", "/machine/hotBarrageOf7Day"):
@@ -187,13 +187,15 @@ class FakePlugin(mod.Sb6657Plugin):
 
     async def _llm_text(self, prompt, system_prompt=None, umo=None):
         LLM_CALLS.append(prompt)
+        LLM_SYSTEMS.append(system_prompt or "")
         return LLM_REPLY[0]
 
 
 FAIL_SEARCH = [False]
 SEQ = [0]
 LLM_CALLS = []
-LLM_REPLY = ['{"terms": ["大表哥", "device"]}']
+LLM_SYSTEMS = []
+LLM_REPLY = ['{"terms": ["大表哥", "karrigan"]}']
 
 
 class FakeEvent:
@@ -385,10 +387,18 @@ async def main():
     check("自然语言检索有冷却", results == [], results)
 
     LLM_CALLS.clear()
+    LLM_SYSTEMS.clear()
     ev = FakeEvent("大表哥的烂梗", origin="nl:group:2")
     results = [r async for r in plugin.on_any_message(ev)]
     check("直搜无果时走 LLM 扩词", len(results) == 1 and "niko" in results[0], results)
     check("LLM 扩词提示词带原话", any("大表哥" in p for p in LLM_CALLS), LLM_CALLS)
+    check("别名对照进入系统提示词", any("大表哥=karrigan" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
+    check("系统提示词不再把大表哥当 device", not any("大表哥」→ device" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
+
+    check("别名对照：默认值", plugin._alias_hints() == "大表哥=karrigan", plugin._alias_hints())
+    plugin.config["llm_alias_hints"] = "大表哥=karrigan; 阿杜=device\n\n"
+    check("别名对照：分号与空行都能拆", plugin._alias_hints().splitlines() == ["大表哥=karrigan", "阿杜=device"], plugin._alias_hints())
+    plugin.config["llm_alias_hints"] = "大表哥=karrigan"
 
     plugin.config["llm_search_enable"] = False
     ev = FakeEvent("完全查不到的东西的烂梗", origin="nl:group:3")

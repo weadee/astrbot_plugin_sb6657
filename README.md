@@ -1,6 +1,6 @@
 # astrbot_plugin_sb6657
 
-![version](https://img.shields.io/badge/version-v1.2.0-blue)
+![version](https://img.shields.io/badge/version-v1.2.1-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 把 [sb6657.cn](https://sb6657.cn)（斗鱼主播 **玩机器** 的烂梗收集站）接进 AstrBot 的插件。
@@ -38,8 +38,12 @@
 
 1. **规则抽取 + 直搜**：从句子里剥掉「来点 / 有没有 / 给我」这类口水词，拿到主题词直接调站内搜索，秒回；
 2. **LLM 扩词**：直搜没结果时，让当前对话模型补别名、外号、英文名、常见错写
-   （例如「大表哥」→ `device`），再逐个搜一遍；
+   （例如「大表哥」→ `karrigan`），再逐个搜一遍；
 3. **标签兜底**：主题词正好是标签名（NiKo、device、京介…）时，按标签随机取。
+
+外号由谁指谁容易搞错，所以留了配置项 **`llm_alias_hints`**（每行一条 `外号=正式名`，
+默认只有 `大表哥=karrigan`）。发现哪条对不上，直接在 WebUI 里改，不用动代码。
+提示词里也明确要求：拿不准的外号只给原词，不许硬凑。
 
 可选 `llm_rerank` 打开后会再让模型对候选做一次相关性重排（多花一次调用，默认关闭）。
 

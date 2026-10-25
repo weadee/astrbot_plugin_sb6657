@@ -142,7 +142,13 @@
     "description": "用 LLM 扩展检索词",
     "type": "bool",
     "default": true,
-    "hint": "直搜没结果时，让对话模型补全别名/外号（如「大表哥」→ device）再搜一次。需要先配好对话模型。"
+    "hint": "直搜没结果时，让对话模型补全别名/外号（如「大表哥」→ karrigan）再搜一次。需要先配好对话模型。"
+  },
+  "llm_alias_hints": {
+    "description": "外号对照表",
+    "type": "string",
+    "default": "大表哥=karrigan",
+    "hint": "每行一条「外号=正式名」，例：大表哥=karrigan。模型据此判断外号指谁，写错会搜到别人的梗，不确定就别加。"
   },
   "llm_search_max_terms": {
     "description": "LLM 最多给出几个检索词",
