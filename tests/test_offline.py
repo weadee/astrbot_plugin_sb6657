@@ -175,6 +175,7 @@ TAGS = {
     "data": [
         {"dictValue": "06", "dictLabel": "群魔乱舞"},
         {"dictValue": "07", "dictLabel": "NiKo"},
+        {"dictValue": "15", "dictLabel": "device"},
     ],
 }
 BOOM = {"code": 500, "msg": "Cannot invoke String.split"}
@@ -189,6 +190,22 @@ class FakePlugin(mod.Sb6657Plugin):
             item["barrage"] = f"{RANDOM['barrage']}（第 {SEQ[0]} 条）"
             return item
         if path == "/machine/Page":
+            tag = str((params or {}).get("tags") or "")
+            if tag == "15":
+                return {
+                    "list": [
+                        {
+                            "id": 7001 + i,
+                            "barrage": f"标签 15 device 的烂梗 {i + 1}",
+                            "cnt": "8",
+                            "tags": "15",
+                            "submitTime": "2026-09-05T10:00:00",
+                        }
+                        for i in range(6)
+                    ],
+                    "total": 6,
+                    "lastPage": True,
+                }
             return PAGE["data"]
         if path == "/machine/pageSearch":
             if FAIL_SEARCH[0]:
@@ -388,7 +405,11 @@ async def main():
 
     ev = FakeEvent("来点niko的烂梗 4条", origin="cnt:nl:1")
     results = [r async for r in plugin.on_any_message(ev)]
-    check("自然语言带数量返回对应条数", len(results) == 1 and results[0].count("搜索命中的 niko") == 4, results)
+    check(
+        "自然语言带数量返回对应条数",
+        len(results) == 1 and results[0].count("🎲 6657 烂梗 #") == 4,
+        results,
+    )
 
     ev = FakeEvent("来 3 条烂梗", origin="cnt:nl:2")
     results = [r async for r in plugin.on_any_message(ev)]
@@ -413,25 +434,52 @@ async def main():
     check("直搜无果时走 LLM 扩词", len(results) == 1 and "niko" in results[0], results)
     check("LLM 扩词提示词带原话", any("表哥" in p for p in LLM_CALLS), LLM_CALLS)
     check("别名对照进入系统提示词", any("大表哥=karrigan" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
-    check("系统提示词带上设备的映射", any("设备=device" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
+    check("系统提示词带上设备的映射", any("=device" in s and "设备" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
+    check("系统提示词带上站内标签", any("站内已有标签" in s and "NiKo" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
     check("系统提示词不再把大表哥当 device", not any("大表哥」→ device" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
 
     hints = plugin._alias_hints()
     check("别名对照：默认值含大表哥", "大表哥=karrigan" in hints.splitlines(), hints)
-    check("别名对照：默认值含设备", "设备=device" in hints.splitlines(), hints)
+    check("别名对照：默认值含设备", "=device" in hints and "设备" in hints, hints)
     check("别名对照：设备映射到 device", plugin._alias_map().get("设备") == "device", plugin._alias_map())
     check("别名对照：阿杜是 dupreeh", plugin._alias_map().get("阿杜") == "dupreeh", plugin._alias_map())
-    plugin.config["llm_alias_hints"] = "大表哥=karrigan; 设备=device\n\n"
-    check("别名对照：分号与空行都能拆", plugin._alias_hints().splitlines() == ["大表哥=karrigan", "设备=device"], plugin._alias_hints())
+    check("别名对照：虾哥是 NiKo", plugin._alias_map().get("虾哥") == "NiKo", plugin._alias_map())
 
-    # 外号直连：规则层就能把「设备」翻成 device，不花 token
+    # 标签补外号：外号能落到站内标签上
+    tag_hit = await plugin._tag_hit("设备")
+    check("标签直连：设备落到 device 标签", tag_hit == ("15", "device"), tag_hit)
+    tag_hit = await plugin._tag_hit("虾哥")
+    check("标签直连：虾哥落到 NiKo 标签", tag_hit == ("07", "NiKo"), tag_hit)
+    tag_hit = await plugin._tag_hit("阿杜")
+    check("标签直连：站内没有 dupreeh 标签就不硬凑", tag_hit is None, tag_hit)
+
+    plugin.config["llm_alias_hints"] = "大表哥=karrigan; 设备=device\n\n"
+    entries = plugin._alias_entries()
+    check("外号配置：分号与空行都能拆", entries.get("大表哥") == "karrigan" and entries.get("设备") == "device", entries)
+    plugin.config["llm_alias_hints"] = "设备="
+    check("外号配置：右侧留空可删掉内置项", plugin._alias_map().get("设备") is None, plugin._alias_map())
+    plugin.config["llm_alias_hints"] = ""
+
+    # 外号直连：规则层就能把「设备」翻成 device 标签，不花 token
     LLM_CALLS.clear()
-    plugin.config["llm_alias_hints"] = "设备=device"
     ev = FakeEvent("设备的烂梗", origin="nl:device:1")
     results = [r async for r in plugin.on_any_message(ev)]
-    check("外号直连：设备的烂梗能搜到 device 的梗", len(results) == 1 and "device" in results[0], results)
+    check("外号直连：设备的烂梗拿到 device 标签下的梗", len(results) == 1 and "标签 15 device" in results[0], results)
     check("外号直连不消耗 LLM", LLM_CALLS == [], LLM_CALLS)
-    plugin.config["llm_alias_hints"] = "大表哥=karrigan"
+
+    # 标签优先关掉后走文本搜索
+    plugin.config["tag_first"] = False
+    ev = FakeEvent("设备的烂梗", origin="nl:device:2")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("关掉标签优先后走文本搜索", len(results) == 1 and "搜索命中的 device" in results[0], results)
+    plugin.config["tag_first"] = True
+
+    out = await plugin.dispatch("设备", "tag-cmd")
+    check("指令用外号也能取标签", "标签 15 device" in out, out)
+    out = await plugin.dispatch("#设备", "tag-cmd2")
+    check("＃外号也能取标签", "标签 15 device" in out, out)
+    out = await plugin.dispatch("虾哥", "tag-cmd3")
+    check("指令用虾哥取到 NiKo 标签", "NiKo" in out, out)
 
     plugin.config["llm_search_enable"] = False
     ev = FakeEvent("完全查不到的东西的烂梗", origin="nl:group:3")

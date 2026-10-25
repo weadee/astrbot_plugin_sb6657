@@ -1,6 +1,6 @@
 # astrbot_plugin_sb6657
 
-![version](https://img.shields.io/badge/version-v1.2.2-blue)
+![version](https://img.shields.io/badge/version-v1.3.0-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 把 [sb6657.cn](https://sb6657.cn)（斗鱼主播 **玩机器** 的烂梗收集站）接进 AstrBot 的插件。
@@ -29,35 +29,50 @@
 在插件配置里打开 `auto_trigger_enable`，群友说「来条烂梗」之类的词就会自动回一条，不需要指令。
 关键词、冷却时间、是否只在群聊生效都可以在配置面板里改。默认会自动阻止 AI 再回复一遍（`auto_trigger_stop_llm`）。
 
-## 自然语言检索（LLM 搜索）
+## 自然语言检索（外号 / 标签 / LLM）
 
 不用打指令，直接说「**niko 的烂梗**」「**来点詹姆斯的烂梗**」「**有没有 device 烂梗**」，
 机器人就会去站里找出对应的梗发出来。
 
-处理分三级，能不花 token 就不花：
+处理分四级，能不花 token 就不花：
 
-1. **规则抽取 + 直搜**：从句子里剥掉「来点 / 有没有 / 给我」这类口水词，拿到主题词直接调站内搜索，秒回；
-2. **外号直连**：主题词命中外号表时，先拿对应的正式名去搜（「设备」→ `device`、「大表哥」→ `karrigan`），搜到的结果并进候选里，仍然不花 token；
-3. **LLM 扩词**：上面都没结果时，才让当前对话模型补别名、英文名、常见错写，再逐个搜一遍；
-4. **标签兜底**：主题词正好是标签名（NiKo、device、京介…）时，按标签随机取。
+1. **标签直连**（最准）：站内标签是人工打的，主题词能对上标签就直接按标签取梗。
+   外号先换算成标签官方写法：`设备 / 阿汤哥` → `device`、`虾哥 / 软脚虾` → `NiKo`、
+   `寒王` → `frozen`、`载物` → `Zywoo`、`孩神` → `m0NESY`……
+2. **规则抽取 + 文本搜索**：标签对不上的外号，换成正式名搜一遍，再拿原词兜底；
+3. **LLM 扩词**：以上都没结果，才让当前对话模型补别名、英文名、常见错写。
+   提示词里会带上站内标签清单，模型只在这份名单里挑名字，不瞎编；
+4. **沉默或提示**：仍然搜不到就默认不吭声（`nl_search_reply_when_empty` 可开提示）。
 
-外号由谁指谁容易搞错，所以留了配置项 **`llm_alias_hints`**（每行一条 `外号=正式名`），默认值：
+### 外号怎么来的
 
-```
-大表哥=karrigan
-设备=device
-阿汤哥=device
-汤黛玉=device
-阿杜=dupreeh
-森爹=s1mple
-九爷=Xyp9x
-魔男=Magisk
-载物=ZywOo
-```
+内置表 **`BUILTIN_ALIASES`** 直接对着站内标签补的，覆盖 CS 圈常见叫法：
 
-> 注意 device 的外号是「设备 / 阿汤哥」，**「阿杜」是 dupreeh**，别写成 device。
-> 这张表两处都用：既写进 LLM 提示词，也被规则层直接拿来搜。发现哪条对不上，
-> 在 WebUI 里改一行就行，不用动代码。提示词里还特意要求：拿不准的外号只给原词，不许硬凑。
+| 标签 | 外号 |
+| --- | --- |
+| `NiKo` | 虾哥 / 软脚虾 / 虾 / 尼尼 / 夜店王子 / 老尼 |
+| `device` | 设备 / 阿汤哥 / 老汤 / 汤黛玉 / 汤姆克鲁斯 / 人类极限 |
+| `S1mple` | 森爹 / 老猪 / 飞猪 / 剑圣 / 防空炮 |
+| `m0NESY` | 小孩 / 孩神 / 孩孩 / 太子 / 海参 |
+| `Zywoo` | 载物 / 大番薯 / 薯薯 / 特务 |
+| `Donk` | 驴 / 魔童 |
+| `frozen` | 寒王 |
+| `ropz` | 911 |
+| `Twistzz` | 发型总监 |
+| `京介` | kyousuke |
+
+站内没标签的也留着，走文本搜索：`大表哥` → karrigan、`阿杜 / 五星上将` → dupreeh、
+`九爷` → Xyp9x、`箱神 / 西兰花` → broky、`雨神` → rain、`点子哥` → cadiaN……
+
+想看某个标签下有哪些外号，直接 `/烂梗 标签`，列表里会跟在标签名后面。
+
+### 想改？
+
+配置项 **`llm_alias_hints`** 每行一条 `外号=正式名`，在内置表上追加或覆盖；
+**右侧留空表示删掉这条内置外号**（比如 `虾=` 就不再把「虾」当成 NiKo）。
+别名忽略大小写、空格和标点，`m0NESY` / `m0nesy`、`#15` / `#device` 都能认。
+
+> 注意 device 的外号是「设备 / 阿汤哥」，**「阿杜」是 dupreeh**，别搞混。
 
 可选 `llm_rerank` 打开后会再让模型对候选做一次相关性重排（多花一次调用，默认关闭）。
 
@@ -116,8 +131,9 @@ niko 的烂梗 3 条
 - `dedupe_size`：每个会话最近发过的烂梗记忆条数，用来避免重复刷同一条，填 `0` 关闭；
 - `nl_search_enable` / `nl_search_cooldown` / `nl_search_groups_only` / `nl_search_stop_llm` /
   `nl_search_reply_when_empty`：自然语言「xxx 的烂梗」的开关、冷却、仅群聊、是否压掉 AI 续写、没搜到时是否吭声；
-- `llm_search_enable` / `llm_search_max_terms` / `llm_rerank` / `llm_timeout` /
-  `llm_tool_enable`：LLM 扩词、扩几个词、是否重排、超时秒数、是否允许 AI 主动调工具；
+- `llm_search_enable` / `tag_first` / `llm_search_max_terms` / `llm_rerank` / `llm_timeout` /
+  `llm_tool_enable`：LLM 扩词、是否优先按标签取梗、扩几个词、是否重排、超时秒数、是否允许 AI 主动调工具；
+- `llm_alias_hints`：在内置外号表上追加/覆盖（右侧留空 = 删掉某条内置外号）；
 - `base_url`：后端地址，默认走 sb6657.cn 站点前端使用的公开后端。
 
 ## 数据来源与声明

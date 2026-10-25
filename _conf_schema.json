@@ -145,10 +145,17 @@
     "hint": "直搜没结果时，让对话模型补全别名/外号（如「大表哥」→ karrigan）再搜一次。需要先配好对话模型。"
   },
   "llm_alias_hints": {
-    "description": "外号对照表",
+    "description": "自定义外号（追加/覆盖）",
     "type": "string",
-    "default": "大表哥=karrigan\n设备=device\n阿汤哥=device\n汤黛玉=device\n阿杜=dupreeh\n森爹=s1mple\n九爷=Xyp9x\n魔男=Magisk\n载物=ZywOo",
-    "hint": "每行一条「外号=正式名」，例：设备=device、大表哥=karrigan。注意阿杜是 dupreeh，别写成 device。这张表既给 LLM 看，也会被规则层直接用（说「设备的烂梗」会先搜 device），所以改完立刻生效。"
+    "default": "",
+    "hint": "内置表已按站内标签补好常见外号（设备=device、虾哥=NiKo、森爹=S1mple…），这里只在想追加或纠正时填。每行「外号=正式名」；右侧留空表示删掉这条内置外号，例：虾= （删掉「虾」）。"
+  },
+  "tag_first": {
+    "description": "主题命中标签时按标签取梗",
+    "type": "bool",
+    "default": true,
+    "obvious_hint": true,
+    "hint": "站内标签是人工打的，比全文搜索准。开启后「设备的烂梗」「虾哥的烂梗」会直接取对应标签下的梗，不再全文搜。"
   },
   "llm_search_max_terms": {
     "description": "LLM 最多给出几个检索词",

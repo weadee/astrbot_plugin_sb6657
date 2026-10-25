@@ -22,9 +22,12 @@
         并可让 LLM 对候选做相关性重排。
         同时注册了一个 LLM 工具 sb6657_meme，让主对话模型也能主动调用。
 
-    外号直连（v1.2.2）
-        外号对照表同时用于规则层：说「设备的烂梗」会先按 device 搜，搜不到
-        再按原词搜，不经过 LLM，省一次模型调用。
+    外号与标签（v1.3）
+        外号表以站内标签为准：内置 BUILTIN_ALIASES 把圈里的叫法对到标签官方写法
+        （设备 / 阿汤哥 → device，虾哥 / 软脚虾 → NiKo，寒王 → frozen …）。
+        主题词命中标签（或外号）时直接按标签取梗，比全文搜索准，也不消耗模型调用；
+        标签对不上的外号再退回文本搜索，最后才走 LLM。配置 llm_alias_hints 可追加、
+        覆盖，或右侧留空删掉某条内置外号。
 
     数量（v1.2）
         「niko 的烂梗 3 条」「来点詹姆斯烂梗 3个」「来 5 条烂梗」都能识别
@@ -52,19 +55,78 @@ from astrbot.api.star import Context, Star
 DEFAULT_BASE_URL = "https://hguofichp.cn:10086"
 SITE_URL = "https://sb6657.cn"
 
-# 外号对照的默认值，可在插件配置 llm_alias_hints 里覆盖/追加，每行「外号=正式名」
-# 注意：device 的外号是「设备」「阿汤哥」；「阿杜」是 dupreeh，别搞混。
-DEFAULT_ALIAS_HINTS = (
-    "大表哥=karrigan\n"
-    "设备=device\n"
-    "阿汤哥=device\n"
-    "汤黛玉=device\n"
-    "阿杜=dupreeh\n"
-    "森爹=s1mple\n"
-    "九爷=Xyp9x\n"
-    "魔男=Magisk\n"
-    "载物=ZywOo"
-)
+# 外号对照：外号 -> 站内正式名。正式名尽量写成站内标签里的官方写法
+# （NiKo / ropz / device / Zywoo …），这样能直接按标签取梗，比全文搜索准。
+# 配置 llm_alias_hints 可以追加或覆盖；右侧留空表示删掉这条内置项。
+BUILTIN_ALIASES = {
+    # ---- 站内有标签的选手 ----
+    "虾哥": "NiKo",
+    "软脚虾": "NiKo",
+    "虾": "NiKo",
+    "尼尼": "NiKo",
+    "夜店王子": "NiKo",
+    "老尼": "NiKo",
+    "911": "ropz",
+    "驴": "Donk",
+    "魔童": "Donk",
+    "载物": "Zywoo",
+    "大番薯": "Zywoo",
+    "薯薯": "Zywoo",
+    "特务": "Zywoo",
+    "小孩": "m0NESY",
+    "孩神": "m0NESY",
+    "孩孩": "m0NESY",
+    "太子": "m0NESY",
+    "海参": "m0NESY",
+    "设备": "device",
+    "阿汤哥": "device",
+    "老汤": "device",
+    "汤黛玉": "device",
+    "汤姆克鲁斯": "device",
+    "人类极限": "device",
+    "刘浓": "device",
+    "发型总监": "Twistzz",
+    "森爹": "S1mple",
+    "老猪": "S1mple",
+    "飞猪": "S1mple",
+    "飞柱": "S1mple",
+    "剑圣": "S1mple",
+    "防空炮": "S1mple",
+    "kyousuke": "京介",
+    "寒王": "frozen",
+    "绿龙": "Team Spirit",
+    "法尔孔": "Falcons",
+    # ---- 站内没标签、但圈里常叫的 ----
+    "大表哥": "karrigan",
+    "阿杜": "dupreeh",
+    "五星上将": "dupreeh",
+    "魔男": "Magisk",
+    "魔法爷爷": "Magisk",
+    "九爷": "Xyp9x",
+    "箱神": "broky",
+    "西兰花": "broky",
+    "雨神": "rain",
+    "点子哥": "cadian",
+    "点圣": "cadian",
+    "小李子": "aleksib",
+    "龙哥": "TeSeS",
+    "龙爪手": "TeSeS",
+    "狂哥": "YEKINDAR",
+    "教父": "FalleN",
+    "上帝": "Jame",
+    "K神": "kennyS",
+    "北极熊": "Snax",
+    "我的朋友": "pashaBiceps",
+    "拍拍熊": "degster",
+    "诸葛呼吸": "HooXi",
+    "狠人": "XANTARES",
+    "表哥": "huNter-",
+    "大壮": "blameF",
+    "电子哥": "electroNic",
+}
+
+# 名字归一化用：这些字符在比对名字时直接忽略
+_NAME_NOISE_RE = re.compile(r"[\s\-_.·'\"、，,]+")
 
 # 指令名与别名。改动时请同步修改 _extract_args 与 _looks_like_command。
 COMMAND_NAMES = ("烂梗", "sb6657", "来条烂梗")
@@ -78,8 +140,9 @@ HELP_TEXT = """🀄 6657 玩机器烂梗 · 数据来自 sb6657.cn
 /烂梗 搜 niko 5    搜 5 条
 /烂梗 热门 5       24 小时热榜（默认 5 条）
 /烂梗 7天          七天热榜
-/烂梗 标签         查看全部标签
+/烂梗 标签         查看全部标签（带外号）
 /烂梗 #07 两条     按标签随机（07 = NiKo）
+/烂梗 设备         外号也能当标签用（设备 = device）
 /烂梗 帮助         显示这份帮助
 
 也可以直接说「NiKo 的烂梗」「来点詹姆斯的烂梗 3 条」，
@@ -242,6 +305,12 @@ def _clean_topic(raw: str) -> str:
     while text.endswith("的"):
         text = text[:-1].strip()
     return text.strip()
+
+
+def _norm_name(name: str) -> str:
+    """名字归一化：忽略大小写、空格、标点，0/1 当 o/i（m0NESY / m0nesy 都能认）。"""
+    text = _NAME_NOISE_RE.sub("", (name or "").strip().lower())
+    return text.replace("0", "o").replace("1", "i")
 
 
 # 数量表达式：「3 条」「三条」「来 5 个」——只有在「烂梗」后面或动词后面才算数
@@ -805,45 +874,103 @@ class Sb6657Plugin(Star):
             value = 3
         return max(1, min(value, 5))
 
-    def _alias_hints(self) -> str:
-        """外号对照表（来自配置），每行「外号=正式名」，也接受分号分隔。"""
-        raw = str(self._cfg("llm_alias_hints", DEFAULT_ALIAS_HINTS) or "").strip()
-        if not raw:
-            return ""
-        lines = [ln.strip() for ln in re.split(r"[\r\n;；]+", raw) if ln.strip()]
-        return "\n".join(lines[:30])
+    def _alias_pairs(self) -> dict[str, tuple[str, str]]:
+        """{归一化外号: (外号原写法, 正式名)}。内置打底，配置可追加/覆盖/删除。"""
+        pairs: dict[str, tuple[str, str]] = {}
+        for alias, official in BUILTIN_ALIASES.items():
+            pairs[_norm_name(alias)] = (alias, official)
+        raw = str(self._cfg("llm_alias_hints", "") or "")
+        for line in re.split(r"[\r\n;；]+", raw):
+            line = line.strip()
+            if not line:
+                continue
+            sep = "=" if "=" in line else ("＝" if "＝" in line else "")
+            if not sep:
+                continue
+            alias, _, official = line.partition(sep)
+            alias = alias.strip()
+            key = _norm_name(alias)
+            if not key:
+                continue
+            official = official.strip()
+            if official:
+                pairs[key] = (alias, official)
+            else:  # 右侧留空 = 删掉这条内置外号
+                pairs.pop(key, None)
+        return pairs
+
+    def _alias_entries(self) -> dict[str, str]:
+        """{归一化外号: 正式名}。"""
+        return {key: official for key, (_, official) in self._alias_pairs().items()}
 
     def _alias_map(self) -> dict[str, str]:
-        """把外号对照表反解成 {小写外号: 正式名}，供规则层直接用（不花 token）。"""
-        mapping: dict[str, str] = {}
-        for line in self._alias_hints().splitlines():
-            for sep in ("=", "＝", ":", "："):
-                if sep in line:
-                    alias, _, name = line.partition(sep)
-                    alias, name = alias.strip(), name.strip()
-                    if alias and name and alias.lower() != name.lower():
-                        mapping.setdefault(alias.lower(), name)
-                    break
-        return mapping
+        """兼容旧调用。"""
+        return self._alias_entries()
+
+    def _alias_hints(self) -> str:
+        """把外号表压成「外号/外号=正式名」几行，喂给 LLM。"""
+        groups: dict[str, list[str]] = {}
+        for alias, official in self._alias_pairs().values():
+            groups.setdefault(official, []).append(alias)
+        lines = [f"{'/'.join(names)}={official}" for official, names in groups.items()]
+        return "\n".join(lines[:40])
 
     def _topic_terms(self, topic: str) -> list[str]:
         """主题词按「先外号对应的正式名、再原词」排好序。"""
         terms = [topic]
-        official = self._alias_map().get(topic.lower())
-        if official and official.lower() != topic.lower():
+        official = self._alias_entries().get(_norm_name(topic))
+        if official and _norm_name(official) != _norm_name(topic):
             terms.insert(0, official)
         return terms
+
+    async def _tag_index(self) -> dict[str, tuple[str, str]]:
+        """归一化名字 -> (标签码, 标签名)。标签名本身 + 指向它的外号都在里面。"""
+        tag_map = await self.get_tag_map()
+        index: dict[str, tuple[str, str]] = {}
+        for value, label in tag_map.items():
+            index.setdefault(_norm_name(label), (value, label))
+        for alias, official in self._alias_entries().items():
+            target = index.get(_norm_name(official))
+            if target:
+                index.setdefault(alias, target)
+        return index
+
+    async def _tag_hit(self, name: str) -> tuple[str, str] | None:
+        """名字（标签名或外号）能落到某个标签上时返回 (标签码, 标签名)。"""
+        key = _norm_name(name)
+        if not key:
+            return None
+        return (await self._tag_index()).get(key)
+
+    async def _tag_memes(self, value: str, limit: int) -> list[dict]:
+        """按标签码取梗。"""
+        try:
+            rows = await self.api_page(page_num=1, page_size=max(limit * 3, 24), tags=value)
+        except Sb6657Error as exc:
+            logger.warning(f"sb6657 标签 {value} 取梗失败：{exc}")
+            return []
+        return rows or []
+
+    async def _tag_alias_labels(self) -> dict[str, list[str]]:
+        """{归一化标签名: [指向它的外号]}，用于标签列表展示。"""
+        labels: dict[str, list[str]] = {}
+        for alias, official in self._alias_pairs().values():
+            labels.setdefault(_norm_name(official), []).append(alias)
+        return labels
 
     async def llm_terms(self, raw_text: str, umo: str | None = None, limit: int | None = None) -> list[str]:
         """让 LLM 把一句话拆成若干个站内能命中的检索词（含别名/外号）。"""
         limit = limit or self._llm_term_limit()
         hints = self._alias_hints()
+        tag_names = sorted({label for label in (await self.get_tag_map()).values() if label})
+        tag_line = " / ".join(tag_names[:60])
         system_prompt = (
             "你在为「6657 玩机器烂梗库」抽取检索词。"
             "用户说了一句话，里面提到某个主播、选手、解说、事件或口头禅，"
             "你要给出能在这个站内搜到相关烂梗的关键词。"
             "优先用原词；再补同义外号、英文名、拼音、常见错写、可以拆开检索的片段。"
             "外号必须是你能确定指同一个人的，拿不准就只给原词，不要硬凑。"
+            + (f"\n站内已有标签（这些名字最准，能对上就用它们）：{tag_line}\n" if tag_line else "")
             + (f"\n已知别名对照（以此为准，不要改判给其他人）：\n{hints}\n" if hints else "")
             + "不要给整句，不要解释，不要加标点。"
             f'只输出 JSON：{{"terms": ["词1", "词2"]}}，最多 {limit} 个。'
@@ -927,24 +1054,40 @@ class Sb6657Plugin(Star):
         allow_llm: bool = True,
         count: int | None = None,
     ) -> str:
-        """按主题检索：先直搜，搜不到再让 LLM 扩词，最后按标签兜底。"""
+        """按主题检索：命中标签就按标签取梗，否则文本搜索，再不行让 LLM 扩词。"""
         topic = _clean_topic(topic)
         if not topic:
             return ""
         limit = self._clamp_count(count) or self._default_count()
         limit = max(1, min(limit, self._max_count()))
-        # 先按「外号 → 正式名」直连：说「设备的烂梗」直接搜 device，不用惊动 LLM
         memes: list[dict] = []
         seen_ids: set[str] = set()
-        for term in self._topic_terms(topic):
-            for meme in await self._search_quiet(term, limit=max(limit * 3, 6)):
+
+        # 1) 标签直连：主题词能对上站内标签（含外号）就直接按标签取梗，最准也最省
+        tag_hit: tuple[str, str] | None = None
+        if bool(self._cfg("tag_first", True)):
+            tag_hit = await self._tag_hit(topic)
+        if tag_hit:
+            for meme in await self._tag_memes(tag_hit[0], max(limit * 3, 12)):
                 key = str(meme.get("id") or meme["content"])
                 if key in seen_ids:
                     continue
                 seen_ids.add(key)
                 memes.append(meme)
-            if len(memes) >= limit:
-                break
+            if memes:
+                logger.info(f"sb6657 主题「{topic}」命中标签 {tag_hit[0]}·{tag_hit[1]}，按标签取梗")
+
+        # 2) 文本搜索：外号先换成正式名，再拿原词兜；标签没取够时补齐
+        if len(memes) < limit:
+            for term in self._topic_terms(topic):
+                for meme in await self._search_quiet(term, limit=max(limit * 3, 6)):
+                    key = str(meme.get("id") or meme["content"])
+                    if key in seen_ids:
+                        continue
+                    seen_ids.add(key)
+                    memes.append(meme)
+                if len(memes) >= limit:
+                    break
 
         if not memes and allow_llm and bool(self._cfg("llm_search_enable", True)):
             terms = await self.llm_terms(raw_text or topic, dedupe_key)
@@ -980,7 +1123,8 @@ class Sb6657Plugin(Star):
         tag_map = await self.get_tag_map()
         blocks: list[str] = []
         if len(picked) > 1 and bool(self._cfg("show_count_header", False)):
-            blocks.append(f"🔍 「{topic}」相关烂梗 {len(picked)} 条")
+            head = f"🏷️ {tag_hit[1]} · " if tag_hit else f"🔍 「{topic}」"
+            blocks.append(f"{head}相关烂梗 {len(picked)} 条")
         blocks += [self.format_meme(m, tag_map) for m in picked]
         return _join_result(blocks)
 
@@ -1007,9 +1151,14 @@ class Sb6657Plugin(Star):
         tag_map = await self.get_tag_map()
         if not tag_map:
             return "🏷️ 暂时拿不到标签列表，稍后再试。"
-        lines = ["🏷️ 6657 烂梗标签（用法：/烂梗 #编号）"]
+        labels = await self._tag_alias_labels()
+        lines = ["🏷️ 6657 烂梗标签（用法：/烂梗 #编号，也可以直接说外号）"]
         for value, label in sorted(tag_map.items(), key=lambda kv: kv[0]):
-            lines.append(f"  {value} · {label}")
+            aliases = [
+                a for a in labels.get(_norm_name(label), []) if _norm_name(a) != _norm_name(label)
+            ][:3]
+            suffix = f"（{' / '.join(aliases)}）" if aliases else ""
+            lines.append(f"  {value} · {label}{suffix}")
         return "\n".join(lines)
 
     async def reply_by_tag(self, raw_tag: str, count: int | None = None) -> str:
@@ -1019,12 +1168,9 @@ class Sb6657Plugin(Star):
 
         tag_map = await self.get_tag_map()
         value = raw_tag if raw_tag in tag_map else None
-        if value is None:  # 允许用标签名代替编号
-            lowered = raw_tag.lower()
-            for val, label in tag_map.items():
-                if label.lower() == lowered:
-                    value = val
-                    break
+        if value is None:  # 标签名、外号都能反查编号
+            hit = await self._tag_hit(raw_tag)
+            value = hit[0] if hit else None
         if value is None:
             return (
                 f"🏷️ 没有找到标签「{raw_tag}」。\n"
@@ -1114,9 +1260,10 @@ class Sb6657Plugin(Star):
         if plain.startswith("#"):
             return await self.reply_by_tag(plain[1:], count)
 
-        tag_map = await self.get_tag_map()
-        if plain in tag_map.values() or plain_lowered in {v.lower() for v in tag_map.values()}:
-            return await self.reply_by_tag(plain, count)
+        # 标签 / 外号直连：「#15」「device」「设备」「森爹」都能走到同一个标签
+        tag_hit = await self._tag_hit(plain)
+        if tag_hit:
+            return await self.reply_by_tag(tag_hit[0], count)
 
         # 兜底当主题检索：兼容「niko」「niko 的烂梗」「点 niko」几种写法
         topic = _match_nl_topic(plain)
