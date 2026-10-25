@@ -79,15 +79,21 @@ async def main():
     for sentence in ("niko的烂梗", "来点詹姆斯的烂梗", "有没有device烂梗", "来条烂梗", "这什么烂梗"):
         print(f"  {sentence!r} -> {mod._match_nl_topic(sentence)!r}")
 
+    print("=== 数量抽取 ===")
+    for sentence in ("来点niko的烂梗 3条", "niko的烂梗来两条", "搜 niko 2", "一个人吃饭的烂梗"):
+        print(f"  {sentence!r} -> {mod._split_count(sentence)!r}")
+
     for label, coro in (
         ("随机 2 条", plugin.dispatch("2", "live")),
-        ("关键词搜索 niko", plugin.dispatch("搜 niko", "live")),
+        ("关键词搜索 niko（默认条数）", plugin.dispatch("搜 niko", "live")),
+        ("关键词搜索 niko 4 条", plugin.dispatch("搜 niko 4", "live")),
         ("主题检索 niko", plugin.reply_topic("niko", "niko的烂梗", "live")),
+        ("主题检索 niko 3 条", plugin.reply_topic("niko", "niko的烂梗 三条", "live", count=3)),
         ("主题检索 device", plugin.reply_topic("device", "device的烂梗", "live")),
         ("24h 热榜", plugin.dispatch("热门", "live")),
         ("七天热榜", plugin.dispatch("7天", "live")),
         ("标签列表", plugin.dispatch("标签", "live")),
-        ("标签 #07", plugin.dispatch("#07", "live")),
+        ("标签 #07 两条", plugin.dispatch("#07 两条", "live")),
         ("默认（空参）", plugin.dispatch("", "live")),
     ):
         try:

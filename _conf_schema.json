@@ -15,7 +15,13 @@
     "description": "默认返回条数",
     "type": "int",
     "default": 1,
-    "hint": "直接发送 /烂梗 时返回几条；搜索和标签随机也会参考这个值。"
+    "hint": "直接发送 /烂梗 时返回几条；主题检索（xxx 的烂梗）也用它。"
+  },
+  "search_count": {
+    "description": "搜索默认返回条数",
+    "type": "int",
+    "default": 3,
+    "hint": "用户没写数量时，/烂梗 搜 xxx 返回几条。句子里写了「3 条」「三条」这类数量则以用户的为准，仍受 max_count 限制。"
   },
   "max_count": {
     "description": "单次最多返回条数",

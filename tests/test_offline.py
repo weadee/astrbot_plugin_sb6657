@@ -123,15 +123,16 @@ SEARCH = {
     "code": 200,
     "msg": "ok",
     "data": {
-        "total": 1,
+        "total": 4,
         "list": [
             {
-                "id": 9002,
-                "barrage": "搜索命中的 niko 烂梗",
+                "id": 9002 + i,
+                "barrage": f"搜索命中的 niko 烂梗 {i + 1}",
                 "cnt": "3",
                 "tags": "07,13",
                 "submitTime": "2026-09-02T11:00:00",
             }
+            for i in range(4)
         ],
         "isLastPage": True,
     },
@@ -339,6 +340,37 @@ async def main():
     check("LLM 检索词解析", mod._parse_terms('{"terms": ["a", "b", "a"]}', 3) == ["a", "b"])
     check("LLM 检索词解析兜底引号", mod._parse_terms('应该是 "device" 吧', 2) == ["device"])
     check("LLM 检索词解析无词可抠", mod._parse_terms("我觉得是 niko 和 device", 2) == [])
+
+    # 9.6 数量解析
+    check("数量：句尾 3 条", mod._split_count("来点 niko 的烂梗 3 条") == ("来点 niko 的烂梗", 3), mod._split_count("来点 niko 的烂梗 3 条"))
+    check("数量：紧贴烂梗", mod._split_count("niko的烂梗3条") == ("niko的烂梗", 3), mod._split_count("niko的烂梗3条"))
+    check("数量：烂梗后面带动词", mod._split_count("niko的烂梗来3条") == ("niko的烂梗", 3), mod._split_count("niko的烂梗来3条"))
+    check("数量：写在前面", mod._split_count("来3条niko的烂梗") == ("来niko的烂梗", 3), mod._split_count("来3条niko的烂梗"))
+    check("数量：中文数字", mod._split_count("来点 device 的烂梗 两 个") == ("来点 device 的烂梗", 2), mod._split_count("来点 device 的烂梗 两 个"))
+    check("数量：「一个人」不算数量", mod._split_count("一个人吃饭的烂梗") == ("一个人吃饭的烂梗", None), mod._split_count("一个人吃饭的烂梗"))
+    check("数量：没写就返回 None", mod._split_count("niko的烂梗") == ("niko的烂梗", None), mod._split_count("niko的烂梗"))
+    check("数量：十二能解析", mod._count_from_token("十二") == 12, mod._count_from_token("十二"))
+
+    out = await plugin.dispatch("搜 niko 2", "cnt-cmd")
+    check("指令搜索指定 2 条", out.count("搜索命中的 niko") == 2, out)
+
+    out = await plugin.dispatch("搜 niko", "cnt-cmd2")
+    check("指令搜索默认按 search_count 发 3 条", out.count("搜索命中的 niko") == 3, out)
+
+    check("数量上限被 max_count 收住", plugin._clamp_count(9) == 5, plugin._clamp_count(9))
+    out = await plugin.dispatch("搜 九条 niko", "cnt-cmd3")
+    check("指令搜索能解析中文数量并受上限约束", out.count("搜索命中的 niko") == 4, out)
+
+    out = await plugin.dispatch("niko的烂梗 两条", "cnt-cmd4")
+    check("指令主题检索按数量返回", out.count("🎲") == 2, out)
+
+    ev = FakeEvent("来点niko的烂梗 4条", origin="cnt:nl:1")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("自然语言带数量返回对应条数", len(results) == 1 and results[0].count("搜索命中的 niko") == 4, results)
+
+    ev = FakeEvent("来 3 条烂梗", origin="cnt:nl:2")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("只说「来 3 条烂梗」按数量随机", len(results) == 1 and results[0].count("踩缝纫机") == 3, results)
 
     out = await plugin.dispatch("niko的烂梗", "nl-cmd")
     check("指令参数也能按主题搜", "niko" in out, out)

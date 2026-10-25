@@ -8,7 +8,7 @@
 功能
     /烂梗            随机来一条
     /烂梗 3          随机来 3 条
-    /烂梗 搜 niko    关键词搜索
+    /烂梗 搜 niko    关键词搜索（可加数量：/烂梗 搜 niko 5）
     /烂梗 热门       24 小时热榜
     /烂梗 7天        七天热榜
     /烂梗 标签       查看全部标签
@@ -20,6 +20,10 @@
         抽出主题词去站内检索；规则抽不出 / 搜不到时，再让 LLM 扩同义词、
         别名（例如 大表哥 → device），并可让 LLM 对候选做相关性重排。
         同时注册了一个 LLM 工具 sb6657_meme，让主对话模型也能主动调用。
+
+    数量（v1.2）
+        「niko 的烂梗 3 条」「来点詹姆斯烂梗 3个」「来 5 条烂梗」都能识别
+        （阿拉伯数字或中文数字都行，上限由 max_count 决定）。
 """
 
 from __future__ import annotations
@@ -51,18 +55,32 @@ HELP_TEXT = """🀄 6657 玩机器烂梗 · 数据来自 sb6657.cn
 
 /烂梗              随机来一条
 /烂梗 3            随机来 3 条
-/烂梗 搜 niko      关键词搜索
-/烂梗 热门         24 小时热榜
+/烂梗 搜 niko      关键词搜索（默认 3 条）
+/烂梗 搜 niko 5    搜 5 条
+/烂梗 热门 5       24 小时热榜（默认 5 条）
 /烂梗 7天          七天热榜
 /烂梗 标签         查看全部标签
-/烂梗 #07          按标签随机（07 = NiKo）
+/烂梗 #07 两条     按标签随机（07 = NiKo）
 /烂梗 帮助         显示这份帮助
 
-也可以直接说「NiKo 的烂梗」「来点詹姆斯的烂梗」，
-机器人会自己去站里找相关的。"""
+也可以直接说「NiKo 的烂梗」「来点詹姆斯的烂梗 3 条」，
+机器人会自己去站里找相关的，条数写在句尾就行。"""
 
 # 自然语言触发：「xxx 的烂梗」这类句式
-NL_SUFFIX_RE = re.compile(r"(?:的)?烂梗(?:呢|啊|呀|吗|吧|嘛)?[\s?？!！。.~～…]*$")
+NL_SUFFIX_RE = re.compile(r"(?:的)?烂梗(?:呢|啊|呀|吗|吧|嘛)?[\s?？!！。.~～…，,、]*$")
+# 中文数字，用于「三条」「十二个」这类数量词
+_CN_DIGITS = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
 # 句式前缀里的口水词，长词在前，避免「给我来点」只吃掉「给我」
 NL_FILLERS = (
     "我想看看",
@@ -205,6 +223,80 @@ def _clean_topic(raw: str) -> str:
     while text.endswith("的"):
         text = text[:-1].strip()
     return text.strip()
+
+
+# 数量表达式：「3 条」「三条」「来 5 个」——只有在「烂梗」后面或动词后面才算数
+_COUNT_NUM = r"(\d{1,2}|[一二两三四五六七八九十]{1,3})"
+_COUNT_UNIT = r"(?:条|个|句|段)"
+_COUNT_TOKEN_RE = re.compile(rf"{_COUNT_NUM}\s*{_COUNT_UNIT}")
+_COUNT_VERB_CHARS = "来发整搞求要给点弄取"
+# 「个」最容易把「一个人」误判成 1 条，所以只认带动词的写法
+_COUNT_LOOSE_UNITS = "条句段"
+_COUNT_TAIL_RE = re.compile(r"[，,、\s]*(?:来|发|整|搞|要|给我|来点|再加|多来)?\s*")
+
+
+def _count_from_token(token: str) -> int | None:
+    """把「3」「三」「十二」这类 token 转成整数。"""
+    token = (token or "").strip()
+    if not token:
+        return None
+    if token.isdigit():
+        value = int(token)
+    elif token == "十":
+        value = 10
+    elif "十" in token:
+        head, _, tail = token.partition("十")
+        tens = _CN_DIGITS.get(head, 1) if head else 1
+        ones = _CN_DIGITS.get(tail, 0) if tail else 0
+        value = tens * 10 + ones
+    else:
+        value = _CN_DIGITS.get(token)
+    if not value or value < 1:
+        return None
+    return value
+
+
+def _split_count(text: str) -> tuple[str, int | None]:
+    """把句子里的数量词剥出来，返回 (去掉数量词的句子, 数量)。
+
+    只认两种位置：紧跟在「烂梗」后面（niko 的烂梗来 3 条），或者跟在一个
+    动词后面（来 3 条 niko 的烂梗 / 3 条 niko 的烂梗）。否则「一个人吃饭
+    的烂梗」这种也会被当成 1 条。
+    """
+    sentence = (text or "").strip()
+    if not sentence:
+        return sentence, None
+
+    for matched in _COUNT_TOKEN_RE.finditer(sentence):
+        count = _count_from_token(matched.group(1))
+        if not count or count > 30:
+            continue
+        start, end = matched.start(1), matched.end()
+        unit = matched.group(0).strip()[-1]
+        before = sentence[:start].rstrip()
+
+        if before and before[-1] in _COUNT_VERB_CHARS:
+            ok = True
+        elif not before:
+            ok = unit in _COUNT_LOOSE_UNITS
+        else:
+            pos = sentence.rfind("烂梗", 0, start)
+            ok = pos >= 0 and bool(_COUNT_TAIL_RE.fullmatch(sentence[pos + 2: start]))
+        if not ok:
+            continue
+
+        rest = (sentence[:start] + sentence[end:]).strip()
+        # 「niko 的烂梗来 3 条」剥完会剩一个「来」，顺手擦掉
+        rest = rest.rstrip(" \t" + _COUNT_VERB_CHARS)
+        return rest, count
+
+    # 没带量词、只用空格隔开的尾随数字：「搜 niko 2」
+    tail = re.search(r"[\s，,、](\d{1,2})\s*$", sentence)
+    if tail:
+        count = _count_from_token(tail.group(1))
+        if count and count <= 30:
+            return sentence[: tail.start()].strip(), count
+    return sentence, None
 
 
 def _match_nl_topic(text: str) -> str | None:
@@ -563,6 +655,18 @@ class Sb6657Plugin(Star):
             value = 1
         return max(1, value)
 
+    def _clamp_count(self, count: Any) -> int | None:
+        """把用户写的数量收进 1 ~ max_count，没写或写错返回 None。"""
+        if count is None:
+            return None
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return None
+        if value < 1:
+            return None
+        return min(value, self._max_count())
+
     async def reply_random(self, count: int, dedupe_key: str) -> str:
         count = max(1, min(count, self._max_count()))
         recent = self._recent_deque(dedupe_key)
@@ -603,20 +707,28 @@ class Sb6657Plugin(Star):
             blocks.insert(0, f"🎲 6657 烂梗 × {len(blocks)}")
         return _join_result(blocks)
 
-    async def reply_search(self, keyword: str) -> str:
+    def _search_count(self) -> int:
+        """没写数量时，搜索默认发几条。"""
+        try:
+            value = int(self._cfg("search_count", 3) or 3)
+        except (TypeError, ValueError):
+            value = 3
+        return max(1, min(value, self._max_count()))
+
+    async def reply_search(self, keyword: str, count: int | None = None) -> str:
         keyword = keyword.strip()
         if not keyword:
             return self._help_text()
-        count = min(self._default_count() + 2, self._max_count() + 2)
+        count = self._clamp_count(count) or self._search_count()
 
         try:
-            memes = await self.api_search(keyword, page_size=count)
+            memes = await self.api_search(keyword, page_size=max(count, 3))
         except Sb6657Error as exc:
             logger.warning(f"sb6657 搜索接口不可用，尝试本地过滤：{exc}")
             memes = []
         if not memes:
             try:
-                memes = await self.api_search_fallback(keyword, limit=count)
+                memes = await self.api_search_fallback(keyword, limit=max(count, 3))
             except Sb6657Error as exc:
                 logger.warning(f"sb6657 兜底搜索失败：{exc}")
                 memes = []
@@ -768,9 +880,8 @@ class Sb6657Plugin(Star):
         topic = _clean_topic(topic)
         if not topic:
             return ""
-        limit = count or self._default_count()
-        limit = max(1, min(int(limit), self._max_count()))
-
+        limit = self._clamp_count(count) or self._default_count()
+        limit = max(1, min(limit, self._max_count()))
         memes = await self._search_quiet(topic, limit=max(limit * 3, 6))
 
         if not memes and allow_llm and bool(self._cfg("llm_search_enable", True)):
@@ -809,12 +920,12 @@ class Sb6657Plugin(Star):
         blocks += [self.format_meme(m, tag_map) for m in picked]
         return _join_result(blocks)
 
-    async def reply_hot(self, days: int) -> str:
+    async def reply_hot(self, days: int, count: int | None = None) -> str:
         try:
             limit = int(self._cfg("hot_count", 5) or 5)
         except (TypeError, ValueError):
             limit = 5
-        limit = max(1, min(limit, self._max_count()))
+        limit = self._clamp_count(count) or max(1, min(limit, self._max_count()))
 
         memes = await self.api_hot(days, limit=limit)
         if not memes:
@@ -837,7 +948,7 @@ class Sb6657Plugin(Star):
             lines.append(f"  {value} · {label}")
         return "\n".join(lines)
 
-    async def reply_by_tag(self, raw_tag: str) -> str:
+    async def reply_by_tag(self, raw_tag: str, count: int | None = None) -> str:
         raw_tag = raw_tag.strip()
         if not raw_tag:
             return await self.reply_tag_list()
@@ -856,7 +967,7 @@ class Sb6657Plugin(Star):
                 "用 /烂梗 标签 查看全部标签，或直接用关键词搜索。"
             )
 
-        count = min(self._default_count(), self._max_count())
+        count = self._clamp_count(count) or min(self._default_count(), self._max_count())
         rows = await self.api_page(page_num=1, page_size=50, tags=value)
         if not rows:
             return f"🏷️「{raw_tag}」标签下暂时没有烂梗。"
@@ -912,34 +1023,42 @@ class Sb6657Plugin(Star):
         if lowered in {"帮助", "help", "?", "？", "菜单", "用法", "说明"}:
             return self._help_text()
 
-        if lowered in {"热门", "热榜", "hot", "24h", "24小时", "24"}:
-            return await self.reply_hot(1)
-
-        if lowered in {"7d", "7天", "七天", "7日", "周榜", "七日榜"}:
-            return await self.reply_hot(7)
-
-        if lowered in {"标签", "tag", "tags", "分类"}:
-            return await self.reply_tag_list()
-
-        matched = re.match(r"^搜[索]?\s*(.+)$", args)
-        if matched:
-            return await self.reply_search(matched.group(1))
-
-        if args.startswith("#"):
-            return await self.reply_by_tag(args[1:])
-
+        # 纯数字就是随机条数，必须在剥数量之前判断
         if re.fullmatch(r"\d{1,3}", args):
             return await self.reply_random(int(args), dedupe_key)
 
+        # 「搜 niko 3」「搜 三条 niko」：先把数量剥出来，剩下的才是关键词
+        matched = re.match(r"^搜[索]?\s*(.+)$", args)
+        if matched:
+            keyword, count = _split_count(matched.group(1))
+            return await self.reply_search(keyword, count)
+
+        # 其余分支都允许在参数里带数量：「热门 5」「#07 两条」「niko 的烂梗 3 条」
+        plain, count = _split_count(args)
+        plain = plain.strip() or args
+        plain_lowered = plain.lower()
+
+        if plain_lowered in {"热门", "热榜", "hot", "24h", "24小时", "24"}:
+            return await self.reply_hot(1, count)
+
+        if plain_lowered in {"7d", "7天", "七天", "7日", "周榜", "七日榜"}:
+            return await self.reply_hot(7, count)
+
+        if plain_lowered in {"标签", "tag", "tags", "分类"}:
+            return await self.reply_tag_list()
+
+        if plain.startswith("#"):
+            return await self.reply_by_tag(plain[1:], count)
+
         tag_map = await self.get_tag_map()
-        if args in tag_map.values() or args.lower() in {v.lower() for v in tag_map.values()}:
-            return await self.reply_by_tag(args)
+        if plain in tag_map.values() or plain_lowered in {v.lower() for v in tag_map.values()}:
+            return await self.reply_by_tag(plain, count)
 
         # 兜底当主题检索：兼容「niko」「niko 的烂梗」「点 niko」几种写法
-        topic = _match_nl_topic(args)
+        topic = _match_nl_topic(plain)
         if topic is None:
-            topic = re.sub(r"(?:的)?烂梗(?:呢|啊|呀|吗|吧)?$", "", args).strip(" 的") or args
-        text = await self.reply_topic(topic, args, dedupe_key)
+            topic = re.sub(r"(?:的)?烂梗(?:呢|啊|呀|吗|吧)?$", "", plain).strip(" 的") or plain
+        text = await self.reply_topic(topic, plain, dedupe_key, count=count)
         return text or f"🔍 没搜到含「{topic}」的烂梗，换几个字试试？"
 
     # ---------------------------------------------------------------- 指令入口
@@ -1007,8 +1126,11 @@ class Sb6657Plugin(Star):
 
         # 1) 自然语言主题检索（默认开启）
         if bool(self._cfg("nl_search_enable", True)):
-            topic = _match_nl_topic(text)
-            if topic:
+            plain, count = _split_count(text)
+            topic = _match_nl_topic(plain)
+            # 「来 3 条烂梗」只给了数量没给主题，直接按数量随机
+            wants_random = not topic and bool(count) and bool(NL_SUFFIX_RE.search(plain))
+            if topic or wants_random:
                 if bool(self._cfg("nl_search_groups_only", False)) and not event.get_group_id():
                     return
                 try:
@@ -1021,9 +1143,12 @@ class Sb6657Plugin(Star):
                 self._last_nl[key] = now
 
                 try:
-                    result = await self.reply_topic(topic, text, key)
+                    if wants_random:
+                        result = await self.reply_random(int(count), key)
+                    else:
+                        result = await self.reply_topic(topic, plain, key, count=count)
                 except Sb6657Error as exc:
-                    logger.warning(f"sb6657 主题检索失败（{topic}）：{exc}")
+                    logger.warning(f"sb6657 主题检索失败（{topic or count}）：{exc}")
                     return
                 if not result:
                     if bool(self._cfg("nl_search_reply_when_empty", False)):
