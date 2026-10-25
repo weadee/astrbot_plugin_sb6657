@@ -1,6 +1,6 @@
 # astrbot_plugin_sb6657
 
-![version](https://img.shields.io/badge/version-v1.2.1-blue)
+![version](https://img.shields.io/badge/version-v1.2.2-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 把 [sb6657.cn](https://sb6657.cn)（斗鱼主播 **玩机器** 的烂梗收集站）接进 AstrBot 的插件。
@@ -37,13 +37,27 @@
 处理分三级，能不花 token 就不花：
 
 1. **规则抽取 + 直搜**：从句子里剥掉「来点 / 有没有 / 给我」这类口水词，拿到主题词直接调站内搜索，秒回；
-2. **LLM 扩词**：直搜没结果时，让当前对话模型补别名、外号、英文名、常见错写
-   （例如「大表哥」→ `karrigan`），再逐个搜一遍；
-3. **标签兜底**：主题词正好是标签名（NiKo、device、京介…）时，按标签随机取。
+2. **外号直连**：主题词命中外号表时，先拿对应的正式名去搜（「设备」→ `device`、「大表哥」→ `karrigan`），搜到的结果并进候选里，仍然不花 token；
+3. **LLM 扩词**：上面都没结果时，才让当前对话模型补别名、英文名、常见错写，再逐个搜一遍；
+4. **标签兜底**：主题词正好是标签名（NiKo、device、京介…）时，按标签随机取。
 
-外号由谁指谁容易搞错，所以留了配置项 **`llm_alias_hints`**（每行一条 `外号=正式名`，
-默认只有 `大表哥=karrigan`）。发现哪条对不上，直接在 WebUI 里改，不用动代码。
-提示词里也明确要求：拿不准的外号只给原词，不许硬凑。
+外号由谁指谁容易搞错，所以留了配置项 **`llm_alias_hints`**（每行一条 `外号=正式名`），默认值：
+
+```
+大表哥=karrigan
+设备=device
+阿汤哥=device
+汤黛玉=device
+阿杜=dupreeh
+森爹=s1mple
+九爷=Xyp9x
+魔男=Magisk
+载物=ZywOo
+```
+
+> 注意 device 的外号是「设备 / 阿汤哥」，**「阿杜」是 dupreeh**，别写成 device。
+> 这张表两处都用：既写进 LLM 提示词，也被规则层直接拿来搜。发现哪条对不上，
+> 在 WebUI 里改一行就行，不用动代码。提示词里还特意要求：拿不准的外号只给原词，不许硬凑。
 
 可选 `llm_rerank` 打开后会再让模型对候选做一次相关性重排（多花一次调用，默认关闭）。
 

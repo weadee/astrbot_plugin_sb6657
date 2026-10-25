@@ -137,6 +137,24 @@ SEARCH = {
         "isLastPage": True,
     },
 }
+DEVICE_SEARCH = {
+    "code": 200,
+    "msg": "ok",
+    "data": {
+        "total": 2,
+        "list": [
+            {
+                "id": 8001 + i,
+                "barrage": f"搜索命中的 device 烂梗 {i + 1}",
+                "cnt": "5",
+                "tags": "07",
+                "submitTime": "2026-09-03T11:00:00",
+            }
+            for i in range(2)
+        ],
+        "isLastPage": True,
+    },
+}
 HOT24 = {
     "code": 200,
     "msg": "ok",
@@ -176,7 +194,9 @@ class FakePlugin(mod.Sb6657Plugin):
             if FAIL_SEARCH[0]:
                 return BOOM
             keyword = str((json_body or {}).get("barrage") or "")
-            if "niko" in keyword.lower() or keyword in ("device", "s1mple", "karrigan"):
+            if keyword.lower() == "device":
+                return DEVICE_SEARCH["data"]
+            if "niko" in keyword.lower() or keyword in ("s1mple", "karrigan"):
                 return SEARCH["data"]
             return {"total": 0, "list": [], "isLastPage": True}
         if path in ("/machine/hotBarrageOf24H", "/machine/hotBarrageOf7Day"):
@@ -388,16 +408,29 @@ async def main():
 
     LLM_CALLS.clear()
     LLM_SYSTEMS.clear()
-    ev = FakeEvent("大表哥的烂梗", origin="nl:group:2")
+    ev = FakeEvent("表哥的烂梗", origin="nl:group:2")
     results = [r async for r in plugin.on_any_message(ev)]
     check("直搜无果时走 LLM 扩词", len(results) == 1 and "niko" in results[0], results)
-    check("LLM 扩词提示词带原话", any("大表哥" in p for p in LLM_CALLS), LLM_CALLS)
+    check("LLM 扩词提示词带原话", any("表哥" in p for p in LLM_CALLS), LLM_CALLS)
     check("别名对照进入系统提示词", any("大表哥=karrigan" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
+    check("系统提示词带上设备的映射", any("设备=device" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
     check("系统提示词不再把大表哥当 device", not any("大表哥」→ device" in s for s in LLM_SYSTEMS), LLM_SYSTEMS)
 
-    check("别名对照：默认值", plugin._alias_hints() == "大表哥=karrigan", plugin._alias_hints())
-    plugin.config["llm_alias_hints"] = "大表哥=karrigan; 阿杜=device\n\n"
-    check("别名对照：分号与空行都能拆", plugin._alias_hints().splitlines() == ["大表哥=karrigan", "阿杜=device"], plugin._alias_hints())
+    hints = plugin._alias_hints()
+    check("别名对照：默认值含大表哥", "大表哥=karrigan" in hints.splitlines(), hints)
+    check("别名对照：默认值含设备", "设备=device" in hints.splitlines(), hints)
+    check("别名对照：设备映射到 device", plugin._alias_map().get("设备") == "device", plugin._alias_map())
+    check("别名对照：阿杜是 dupreeh", plugin._alias_map().get("阿杜") == "dupreeh", plugin._alias_map())
+    plugin.config["llm_alias_hints"] = "大表哥=karrigan; 设备=device\n\n"
+    check("别名对照：分号与空行都能拆", plugin._alias_hints().splitlines() == ["大表哥=karrigan", "设备=device"], plugin._alias_hints())
+
+    # 外号直连：规则层就能把「设备」翻成 device，不花 token
+    LLM_CALLS.clear()
+    plugin.config["llm_alias_hints"] = "设备=device"
+    ev = FakeEvent("设备的烂梗", origin="nl:device:1")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("外号直连：设备的烂梗能搜到 device 的梗", len(results) == 1 and "device" in results[0], results)
+    check("外号直连不消耗 LLM", LLM_CALLS == [], LLM_CALLS)
     plugin.config["llm_alias_hints"] = "大表哥=karrigan"
 
     plugin.config["llm_search_enable"] = False

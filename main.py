@@ -18,9 +18,13 @@
     LLM 搜索（v1.1）
         群里直接说「niko 的烂梗」「来点詹姆斯的烂梗」这类话，插件会自己
         抽出主题词去站内检索；规则抽不出 / 搜不到时，再让 LLM 扩同义词、
-        别名（例如 大表哥 → karrigan，对照表可在配置里维护），并可让 LLM
-        对候选做相关性重排。
+        别名（例如 大表哥 → karrigan、设备 → device，对照表可在配置里维护），
+        并可让 LLM 对候选做相关性重排。
         同时注册了一个 LLM 工具 sb6657_meme，让主对话模型也能主动调用。
+
+    外号直连（v1.2.2）
+        外号对照表同时用于规则层：说「设备的烂梗」会先按 device 搜，搜不到
+        再按原词搜，不经过 LLM，省一次模型调用。
 
     数量（v1.2）
         「niko 的烂梗 3 条」「来点詹姆斯烂梗 3个」「来 5 条烂梗」都能识别
@@ -49,7 +53,18 @@ DEFAULT_BASE_URL = "https://hguofichp.cn:10086"
 SITE_URL = "https://sb6657.cn"
 
 # 外号对照的默认值，可在插件配置 llm_alias_hints 里覆盖/追加，每行「外号=正式名」
-DEFAULT_ALIAS_HINTS = "大表哥=karrigan"
+# 注意：device 的外号是「设备」「阿汤哥」；「阿杜」是 dupreeh，别搞混。
+DEFAULT_ALIAS_HINTS = (
+    "大表哥=karrigan\n"
+    "设备=device\n"
+    "阿汤哥=device\n"
+    "汤黛玉=device\n"
+    "阿杜=dupreeh\n"
+    "森爹=s1mple\n"
+    "九爷=Xyp9x\n"
+    "魔男=Magisk\n"
+    "载物=ZywOo"
+)
 
 # 指令名与别名。改动时请同步修改 _extract_args 与 _looks_like_command。
 COMMAND_NAMES = ("烂梗", "sb6657", "来条烂梗")
@@ -798,6 +813,27 @@ class Sb6657Plugin(Star):
         lines = [ln.strip() for ln in re.split(r"[\r\n;；]+", raw) if ln.strip()]
         return "\n".join(lines[:30])
 
+    def _alias_map(self) -> dict[str, str]:
+        """把外号对照表反解成 {小写外号: 正式名}，供规则层直接用（不花 token）。"""
+        mapping: dict[str, str] = {}
+        for line in self._alias_hints().splitlines():
+            for sep in ("=", "＝", ":", "："):
+                if sep in line:
+                    alias, _, name = line.partition(sep)
+                    alias, name = alias.strip(), name.strip()
+                    if alias and name and alias.lower() != name.lower():
+                        mapping.setdefault(alias.lower(), name)
+                    break
+        return mapping
+
+    def _topic_terms(self, topic: str) -> list[str]:
+        """主题词按「先外号对应的正式名、再原词」排好序。"""
+        terms = [topic]
+        official = self._alias_map().get(topic.lower())
+        if official and official.lower() != topic.lower():
+            terms.insert(0, official)
+        return terms
+
     async def llm_terms(self, raw_text: str, umo: str | None = None, limit: int | None = None) -> list[str]:
         """让 LLM 把一句话拆成若干个站内能命中的检索词（含别名/外号）。"""
         limit = limit or self._llm_term_limit()
@@ -897,14 +933,27 @@ class Sb6657Plugin(Star):
             return ""
         limit = self._clamp_count(count) or self._default_count()
         limit = max(1, min(limit, self._max_count()))
-        memes = await self._search_quiet(topic, limit=max(limit * 3, 6))
+        # 先按「外号 → 正式名」直连：说「设备的烂梗」直接搜 device，不用惊动 LLM
+        memes: list[dict] = []
+        seen_ids: set[str] = set()
+        for term in self._topic_terms(topic):
+            for meme in await self._search_quiet(term, limit=max(limit * 3, 6)):
+                key = str(meme.get("id") or meme["content"])
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                memes.append(meme)
+            if len(memes) >= limit:
+                break
 
         if not memes and allow_llm and bool(self._cfg("llm_search_enable", True)):
             terms = await self.llm_terms(raw_text or topic, dedupe_key)
-            seen: set[str] = set()
+            tried = {term.lower() for term in self._topic_terms(topic)}
+            seen = seen_ids
             for term in terms:
-                if term.lower() == topic.lower():
+                if term.lower() in tried:
                     continue
+                tried.add(term.lower())
                 for meme in await self._search_quiet(term, limit=max(limit * 2, 4)):
                     key = str(meme.get("id") or meme["content"])
                     if key in seen:
