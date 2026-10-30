@@ -29,6 +29,25 @@
     "default": 10,
     "hint": "防止有人刷 /烂梗 100 把机器人打死。"
   },
+  "split_send_enable": {
+    "description": "少量几条时分条发送",
+    "type": "bool",
+    "default": true,
+    "obvious_hint": true,
+    "hint": "开启后，一次只发一两条时会分开发（像人手打的一条条冒出来），条数多了仍合并成一条，免得刷屏。"
+  },
+  "split_send_max": {
+    "description": "分条发送的条数上限",
+    "type": "int",
+    "default": 3,
+    "hint": "返回条数不超过这个值就逐条发，超过就合并成一条。填 0 表示永远合并（等于关掉分条）。"
+  },
+  "split_send_interval": {
+    "description": "分条发送的间隔（秒）",
+    "type": "int",
+    "default": 1,
+    "hint": "两条消息之间停多久，别太快免得被风控或前后顺序乱掉。建议 0.5 ~ 1.5。"
+  },
   "hot_count": {
     "description": "热榜返回条数",
     "type": "int",

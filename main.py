@@ -298,6 +298,23 @@ def _join_result(items: list[str]) -> str:
     return ("\n\n".join(items)).strip()
 
 
+class MemeBlocks(str):
+    """既是拼好的整段文本（兼容 str 用法），又保留每一条，供分条发送。
+
+    继承 str 是为了让「一条消息」的旧调用（拼接、断言、LLM 工具）保持不变，
+    发送时再看 blocks 决定是拆成几条发还是合并发。
+    """
+
+    blocks: list[str]
+
+    def __new__(cls, body: list[str], header: str = "") -> "MemeBlocks":
+        blocks = [b for b in body if b and b.strip()]
+        text = _join_result(([header] if header else []) + blocks)
+        obj = super().__new__(cls, text)
+        obj.blocks = blocks
+        return obj
+
+
 def _clean_topic(raw: str) -> str:
     """去掉主题词前后的标点、@提及和收尾的「的」。"""
     text = re.sub(r"@\S+", " ", raw or "")
@@ -525,6 +542,43 @@ class Sb6657Plugin(Star):
 
     def _base_url(self) -> str:
         return str(self._cfg("base_url", DEFAULT_BASE_URL) or DEFAULT_BASE_URL).rstrip("/")
+
+    # ---------------------------------------------------------------- 发送策略
+
+    def _split_max(self) -> int:
+        """不超过这么多条时逐条发，超过就合并成一条。0 表示永远合并。"""
+        try:
+            value = int(self._cfg("split_send_max", 3) or 0)
+        except (TypeError, ValueError):
+            value = 3
+        return max(0, value)
+
+    def _split_interval(self) -> float:
+        try:
+            value = float(self._cfg("split_send_interval", 1) or 0)
+        except (TypeError, ValueError):
+            value = 1.0
+        return max(0.0, min(value, 5.0))
+
+    async def send_texts(self, event: AstrMessageEvent, result: Any):
+        """按配置把结果发出去：少量分条、大量合并，中间留一点间隔防刷屏。"""
+        if result is None:
+            return
+        blocks = list(getattr(result, "blocks", None) or [])
+        limit = self._split_max() if bool(self._cfg("split_send_enable", True)) else 0
+        if limit > 0 and 1 < len(blocks) <= limit:
+            gap = self._split_interval()
+            for index, block in enumerate(blocks):
+                text = block.strip()
+                if not text:
+                    continue
+                if index and gap > 0:
+                    await asyncio.sleep(gap)
+                yield event.plain_result(text)
+            return
+        text = str(result).strip()
+        if text:
+            yield event.plain_result(text)
 
     # ---------------------------------------------------------------- HTTP 层
 
@@ -791,9 +845,10 @@ class Sb6657Plugin(Star):
 
         tag_map = await self.get_tag_map()
         blocks = [self.format_meme(m, tag_map) for m in picked]
+        header = ""
         if len(blocks) > 1 and bool(self._cfg("show_count_header", False)):
-            blocks.insert(0, f"🎲 6657 烂梗 × {len(blocks)}")
-        return _join_result(blocks)
+            header = f"🎲 6657 烂梗 × {len(blocks)}"
+        return MemeBlocks(blocks, header)
 
     def _search_count(self) -> int:
         """没写数量时，搜索默认发几条。"""
@@ -826,11 +881,10 @@ class Sb6657Plugin(Star):
 
         memes = memes[:count]
         tag_map = await self.get_tag_map()
-        blocks: list[str] = []
+        header = ""
         if bool(self._cfg("show_count_header", False)):
-            blocks.append(f"🔍 「{keyword}」相关烂梗 {len(memes)} 条")
-        blocks += [self.format_meme(m, tag_map) for m in memes]
-        return _join_result(blocks)
+            header = f"🔍 「{keyword}」相关烂梗 {len(memes)} 条"
+        return MemeBlocks([self.format_meme(m, tag_map) for m in memes], header)
 
     # ---------------------------------------------------------------- LLM 检索
 
@@ -1121,12 +1175,11 @@ class Sb6657Plugin(Star):
             return ""
 
         tag_map = await self.get_tag_map()
-        blocks: list[str] = []
+        header = ""
         if len(picked) > 1 and bool(self._cfg("show_count_header", False)):
             head = f"🏷️ {tag_hit[1]} · " if tag_hit else f"🔍 「{topic}」"
-            blocks.append(f"{head}相关烂梗 {len(picked)} 条")
-        blocks += [self.format_meme(m, tag_map) for m in picked]
-        return _join_result(blocks)
+            header = f"{head}相关烂梗 {len(picked)} 条"
+        return MemeBlocks([self.format_meme(m, tag_map) for m in picked], header)
 
     async def reply_hot(self, days: int, count: int | None = None) -> str:
         try:
@@ -1140,12 +1193,11 @@ class Sb6657Plugin(Star):
             return "🔥 现在还没有热榜数据，稍后再试。"
 
         tag_map = await self.get_tag_map()
-        blocks: list[str] = []
+        header = ""
         if bool(self._cfg("show_count_header", False)):
             title = "🔥 6657 七天热榜" if days == 7 else "🔥 6657 24 小时热榜"
-            blocks.append(f"{title}（Top {len(memes)}）")
-        blocks += [self.format_meme(m, tag_map) for m in memes]
-        return _join_result(blocks)
+            header = f"{title}（Top {len(memes)}）"
+        return MemeBlocks([self.format_meme(m, tag_map) for m in memes], header)
 
     async def reply_tag_list(self) -> str:
         tag_map = await self.get_tag_map()
@@ -1184,11 +1236,10 @@ class Sb6657Plugin(Star):
 
         picked = random.sample(rows, k=min(count, len(rows)))
         label = tag_map.get(value, raw_tag)
-        blocks: list[str] = []
+        header = ""
         if bool(self._cfg("show_count_header", False)):
-            blocks.append(f"🏷️ {label} · 随机 {len(picked)} 条")
-        blocks += [self.format_meme(m, tag_map) for m in picked]
-        return _join_result(blocks)
+            header = f"🏷️ {label} · 随机 {len(picked)} 条"
+        return MemeBlocks([self.format_meme(m, tag_map) for m in picked], header)
 
     # ---------------------------------------------------------------- 参数解析
 
@@ -1289,7 +1340,8 @@ class Sb6657Plugin(Star):
             yield event.plain_result("😥 插件出错了，请查看 AstrBot 日志。")
             return
         if text:
-            yield event.plain_result(text)
+            async for reply in self.send_texts(event, text):
+                yield reply
 
     # ---------------------------------------------------------------- LLM 工具
 
@@ -1367,7 +1419,8 @@ class Sb6657Plugin(Star):
                     return
                 if bool(self._cfg("nl_search_stop_llm", True)):
                     self._stop_event(event)
-                yield event.plain_result(result)
+                async for reply in self.send_texts(event, result):
+                    yield reply
                 return
 
         # 2) 老的关键词随机触发（默认关闭）
@@ -1398,7 +1451,8 @@ class Sb6657Plugin(Star):
 
         if bool(self._cfg("auto_trigger_stop_llm", True)):
             self._stop_event(event)
-        yield event.plain_result(result)
+        async for reply in self.send_texts(event, result):
+            yield reply
 
     @staticmethod
     def _stop_event(event: AstrMessageEvent) -> None:

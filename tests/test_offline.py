@@ -413,7 +413,11 @@ async def main():
 
     ev = FakeEvent("来 3 条烂梗", origin="cnt:nl:2")
     results = [r async for r in plugin.on_any_message(ev)]
-    check("只说「来 3 条烂梗」按数量随机", len(results) == 1 and results[0].count("踩缝纫机") == 3, results)
+    check(
+        "只说「来 3 条烂梗」按数量随机（3 条分开发）",
+        len(results) == 3 and all("踩缝纫机" in r for r in results),
+        results,
+    )
 
     out = await plugin.dispatch("niko的烂梗", "nl-cmd")
     check("指令参数也能按主题搜", "niko" in out, out)
@@ -527,6 +531,45 @@ async def main():
     out = await pure.dispatch("搜 niko", "pure")
     check("纯梗模式搜索没有搜索标题", "相关烂梗" not in out, repr(out))
     check("纯梗模式搜索仍有内容", "niko" in out, repr(out))
+
+    # 13. 分条发送：<= 3 条分开发，> 3 条合并发
+    plugin.config["split_send_interval"] = 0
+
+    ev = FakeEvent("来点niko的烂梗 2条", origin="split:1")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("分条发送：2 条分成两条消息", len(results) == 2, results)
+    check("分条发送：每条只有一条梗", all(r.count("\n\n") == 0 for r in results), results)
+
+    ev = FakeEvent("来点niko的烂梗 3条", origin="split:2")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("分条发送：3 条分成三条消息", len(results) == 3, results)
+
+    ev = FakeEvent("来点niko的烂梗 4条", origin="split:3")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("分条发送：4 条合并成一条消息", len(results) == 1, results)
+    check("分条发送：合并时仍是 4 条梗", results[0].count("🎲 6657 烂梗 #") == 4, results)
+
+    ev = FakeEvent("/烂梗 搜 niko 3", origin="split:4")
+    results = [r async for r in plugin.sb6657_cmd(ev)]
+    check("分条发送：指令搜索 3 条也分开发", len(results) == 3, results)
+
+    plugin.config["split_send_enable"] = False
+    ev = FakeEvent("来点niko的烂梗 3条", origin="split:5")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("分条发送：关掉开关后合并成一条", len(results) == 1, results)
+    plugin.config["split_send_enable"] = True
+
+    plugin.config["split_send_max"] = 1
+    ev = FakeEvent("来点niko的烂梗 2条", origin="split:6")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("分条发送：上限按配置收紧", len(results) == 1, results)
+    plugin.config["split_send_max"] = 3
+
+    plugin.config["split_send_max"] = 0
+    ev = FakeEvent("来点niko的烂梗 2条", origin="split:7")
+    results = [r async for r in plugin.on_any_message(ev)]
+    check("分条发送：填 0 表示永远合并", len(results) == 1, results)
+    plugin.config["split_send_max"] = 3
 
     print()
     if FAILURES:

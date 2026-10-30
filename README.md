@@ -1,6 +1,6 @@
 # astrbot_plugin_sb6657
 
-![version](https://img.shields.io/badge/version-v1.3.0-blue)
+![version](https://img.shields.io/badge/version-v1.4.0-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 把 [sb6657.cn](https://sb6657.cn)（斗鱼主播 **玩机器** 的烂梗收集站）接进 AstrBot 的插件。
@@ -99,6 +99,22 @@ niko 的烂梗 3 条
 顺手做了防误判：数量必须跟在「烂梗」后面、或者跟在「来 / 发 / 整 / 给我」这类动词后面才算数，
 所以「一个人吃饭的烂梗」不会被当成要 1 条。
 
+## 一条还是几条（分条发送）
+
+- **≤ 3 条**：逐条发，像人手打的一条条冒出来，中间隔 `split_send_interval` 秒（默认 1 秒）；
+- **> 3 条**：合并成一条，避免刷屏。
+
+也就是说，单发一条时没有任何变化，要两三条时群里看到的是两条三条独立消息。
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `split_send_enable` | 开 | 关掉就永远合并成一条 |
+| `split_send_max` | 3 | 不超过这个条数就分条发；填 `0` 等于关掉分条 |
+| `split_send_interval` | 1 | 两条之间的间隔秒数，建议 0.5 ~ 1.5 |
+
+分条只对「多条梗」生效：搜索结果、标签随机、热榜、`/烂梗 3`、`来 3 条烂梗` 都遵循这条规则；
+提示语（没搜到、标签列表、帮助）永远是一条。
+
 ## 输出格式
 
 默认**只发梗本身**，不带编号、标签、热度、时间和链接：
@@ -126,6 +142,7 @@ niko 的烂梗 3 条
 见插件目录下的 `_conf_schema.json`，在 WebUI 里可视化修改。常用几项：
 
 - `default_count` / `search_count` / `max_count` / `hot_count`：返回条数控制（`search_count` 是搜索的默认条数，用户在句子里写了数量就以用户为准）；
+- `split_send_enable` / `split_send_max` / `split_send_interval`：分条发送开关、分条的条数上限、分条间隔秒数；
 - `max_length`：单条烂梗截断长度，填 `0` 不限制；
 - `show_title` / `show_count_header` / `show_tags` / `show_meta` / `append_source`：附加信息开关，默认全关，只发梗本身；
 - `dedupe_size`：每个会话最近发过的烂梗记忆条数，用来避免重复刷同一条，填 `0` 关闭；
